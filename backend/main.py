@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, EmailStr
 from psycopg2.extras import RealDictCursor
 from db import get_connection
+import os
 
 app = FastAPI()
 
@@ -127,3 +128,46 @@ def get_order(order_id: int):
 
     order["total"] = float(order["total"])
     return order
+
+@app.get("/admin/stats")
+def admin_stats(key: str):
+    if key != os.getenv("ADMIN_KEY"):
+        raise HTTPException(status_code=403, detail="Not authorised")
+
+    conn = get_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    cur.execute("SELECT COUNT(*) AS total FROM users")
+    users_count = cur.fetchone()["total"]
+
+    cur.execute("SELECT COUNT(*) AS total FROM orders WHERE status = 'paid'")
+    sold_count = cur.fetchone()["total"]
+
+    cur.execute("""
+        SELECT COALESCE(SUM(total), 0) AS revenue
+        FROM orders WHERE status = 'paid'
+    """)
+    revenue = float(cur.fetchone()["revenue"])
+
+    cur.execute("""
+        SELECT u.name, u.email, a.title, o.status, o.total
+        FROM users u
+        LEFT JOIN orders o   ON o.user_id = u.id
+        LEFT JOIN artworks a ON a.id = o.artwork_id
+        ORDER BY u.name
+    """)
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    for row in rows:
+        if row["total"] is not None:
+            row["total"] = float(row["total"])
+
+    return {
+        "users_registered": users_count,
+        "artworks_sold": sold_count,
+        "revenue": revenue,
+        "table": rows
+    }
