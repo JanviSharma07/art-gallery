@@ -1,8 +1,20 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, EmailStr
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
 from psycopg2.extras import RealDictCursor
+
 from db import get_connection
+
+from auth import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    get_current_user
+)
+
 from fastapi.middleware.cors import CORSMiddleware
+
 import os
 
 app = FastAPI()
