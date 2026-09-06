@@ -72,23 +72,94 @@ def get_artworks():
 
 @app.post("/register")
 def register(data: RegisterRequest):
+
+    if len(data.password) < 8:
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 8 characters long"
+        )
+
+    username = data.username.strip()
+
+    if not username:
+        raise HTTPException(
+            status_code=400,
+            detail="Username is required"
+        )
+
     conn = get_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
-    cur.execute("""
-        INSERT INTO users (name, email)
-        VALUES (%s, %s)
-        ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
-        RETURNING id, name, email
-    """, (data.name, data.email))
+    try:
 
-    user = cur.fetchone()
-    conn.commit()
+        # Check whether username or email already exists
+        cur.execute(
+            """
+            SELECT id
+            FROM users
+            WHERE email = %s OR username = %s
+            """,
+            (data.email, username)
+        )
 
-    cur.close()
-    conn.close()
+        existing_user = cur.fetchone()
 
-    return user
+        if existing_user:
+            raise HTTPException(
+                status_code=409,
+                detail="Username or email already registered"
+            )
+
+        hashed_password = hash_password(data.password)
+
+        cur.execute(
+            """
+            INSERT INTO users
+                (name, username, email, password_hash)
+            VALUES
+                (%s, %s, %s, %s)
+            RETURNING id, name, username, email
+            """,
+            (
+                username,
+                username,
+                data.email,
+                hashed_password
+            )
+        )
+
+        user = cur.fetchone()
+
+        conn.commit()
+
+        token = create_access_token(
+            user["id"],
+            user["username"],
+            user["email"]
+        )
+
+        return {
+            "message": "Account created successfully",
+            "user": user,
+            "access_token": token,
+            "token_type": "bearer"
+        }
+
+    except HTTPException:
+        conn.rollback()
+        raise
+
+    except Exception:
+        conn.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Could not create account"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
 @app.post("/orders")
 def create_order(data: OrderRequest):
     conn = get_connection()
