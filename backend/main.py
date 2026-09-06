@@ -14,11 +14,11 @@ from auth import (
 )
 
 from fastapi.middleware.cors import CORSMiddleware
-
+import psycopg2
 import os
 
 app = FastAPI()
-
+security = HTTPBearer()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -32,7 +32,14 @@ app.add_middleware(
 
 class RegisterRequest(BaseModel):
     name: str
+    username: str
     email: EmailStr
+    password: str
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
 
 class OrderRequest(BaseModel):
     user_id: int
@@ -70,20 +77,72 @@ def register(data: RegisterRequest):
     conn = get_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
+    try:
+        cur.execute("""
+            INSERT INTO users (name, username, email, password_hash)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id, name, username, email
+        """, (
+            data.name,
+            data.username,
+            data.email,
+            hash_password(data.password)
+        ))
+
+        user = cur.fetchone()
+        conn.commit()
+
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Username or email already taken"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    token = create_access_token(user["id"], user["username"], user["email"])
+
+    return {"user": user, "access_token": token, "token_type": "bearer"}
+
+
+@app.post("/login")
+def login(data: LoginRequest):
+    conn = get_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
     cur.execute("""
-        INSERT INTO users (name, email)
-        VALUES (%s, %s)
-        ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
-        RETURNING id, name, email
-    """, (data.name, data.email))
+        SELECT id, name, username, email, password_hash
+        FROM users
+        WHERE username = %s
+    """, (data.username,))
 
     user = cur.fetchone()
-    conn.commit()
 
     cur.close()
     conn.close()
 
-    return user
+    if user is None or user["password_hash"] is None:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    if not verify_password(data.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    token = create_access_token(user["id"], user["username"], user["email"])
+
+    return {
+        "user": {
+            "id": user["id"],
+            "name": user["name"],
+            "username": user["username"],
+            "email": user["email"],
+        },
+        "access_token": token,
+        "token_type": "bearer"
+    }
+
 @app.post("/orders")
 def create_order(data: OrderRequest):
     conn = get_connection()
