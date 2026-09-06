@@ -160,6 +160,63 @@ def register(data: RegisterRequest):
     finally:
         cur.close()
         conn.close()
+
+@app.post("/login")
+def login(data: LoginRequest):
+
+    conn = get_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+
+        cur.execute(
+            """
+            SELECT id, name, username, email, password_hash
+            FROM users
+            WHERE email = %s OR username = %s
+            """,
+            (data.login, data.login)
+        )
+
+        user = cur.fetchone()
+
+        if user is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid username/email or password"
+            )
+
+        if not verify_password(
+            data.password,
+            user["password_hash"]
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid username/email or password"
+            )
+
+        token = create_access_token(
+            user["id"],
+            user["username"],
+            user["email"]
+        )
+
+        return {
+            "message": "Login successful",
+            "user": {
+                "id": user["id"],
+                "name": user["name"],
+                "username": user["username"],
+                "email": user["email"]
+            },
+            "access_token": token,
+            "token_type": "bearer"
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+        
 @app.post("/orders")
 def create_order(data: OrderRequest):
     conn = get_connection()
