@@ -216,7 +216,15 @@ def login(data: LoginRequest):
     finally:
         cur.close()
         conn.close()
-        
+
+@app.get("/me")
+def get_me(
+    credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())
+):
+
+    return get_current_user(credentials)
+
+
 @app.post("/orders")
 def create_order(data: OrderRequest):
     conn = get_connection()
