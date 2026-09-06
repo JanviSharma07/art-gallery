@@ -31,8 +31,9 @@ app.add_middleware(
 # ---------- request models ----------
 
 class RegisterRequest(BaseModel):
-    name: str
+    username: str
     email: EmailStr
+    password: str
 
 class OrderRequest(BaseModel):
     user_id: int
