@@ -32,11 +32,51 @@ export async function getArtworks() {
   return request("/artworks");
 }
 
-export async function registerUser(name, email) {
+export async function registerUser(data) {
   return request("/register", {
     method: "POST",
-    body: JSON.stringify({ name, email })
+    body: JSON.stringify({
+      username: data.username,
+      email: data.email,
+      password: data.password
+    })
   });
+}
+
+export async function loginUser(data) {
+  return request("/login", {
+    method: "POST",
+    body: JSON.stringify({
+      login: data.login,
+      password: data.password
+    })
+  });
+}
+
+export async function getCurrentUser() {
+  const token = localStorage.getItem("atelier_token");
+
+  if (!token) {
+    return null;
+  }
+
+  try {
+    return await request("/me", {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+  } catch (error) {
+    localStorage.removeItem("atelier_token");
+    localStorage.removeItem("atelier_user");
+
+    return null;
+  }
+}
+
+export function logoutUser() {
+  localStorage.removeItem("atelier_token");
+  localStorage.removeItem("atelier_user");
 }
 
 export async function createOrder(userId, artworkId) {

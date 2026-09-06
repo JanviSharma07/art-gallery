@@ -36,6 +36,8 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
 
+class LoginRequest(BaseModel):
+    login: str
 
 class LoginRequest(BaseModel):
     username: str
@@ -74,10 +76,157 @@ def get_artworks():
 
 @app.post("/register")
 def register(data: RegisterRequest):
+
+    if len(data.password) < 8:
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 8 characters long"
+        )
+
+    username = data.username.strip()
+
+    if not username:
+        raise HTTPException(
+            status_code=400,
+            detail="Username is required"
+        )
+
     conn = get_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
     try:
+
+        # Check whether username or email already exists
+        cur.execute(
+            """
+            SELECT id
+            FROM users
+            WHERE email = %s OR username = %s
+            """,
+            (data.email, username)
+        )
+
+        existing_user = cur.fetchone()
+
+        if existing_user:
+            raise HTTPException(
+                status_code=409,
+                detail="Username or email already registered"
+            )
+
+        hashed_password = hash_password(data.password)
+
+        cur.execute(
+            """
+            INSERT INTO users
+                (name, username, email, password_hash)
+            VALUES
+                (%s, %s, %s, %s)
+            RETURNING id, name, username, email
+            """,
+            (
+                username,
+                username,
+                data.email,
+                hashed_password
+            )
+        )
+
+        user = cur.fetchone()
+
+        conn.commit()
+
+        token = create_access_token(
+            user["id"],
+            user["username"],
+            user["email"]
+        )
+
+        return {
+            "message": "Account created successfully",
+            "user": user,
+            "access_token": token,
+            "token_type": "bearer"
+        }
+
+    except HTTPException:
+        conn.rollback()
+        raise
+
+    except Exception:
+        conn.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Could not create account"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+@app.post("/login")
+def login(data: LoginRequest):
+
+    conn = get_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+
+        cur.execute(
+            """
+            SELECT id, name, username, email, password_hash
+            FROM users
+            WHERE email = %s OR username = %s
+            """,
+            (data.login, data.login)
+        )
+
+        user = cur.fetchone()
+
+        if user is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid username/email or password"
+            )
+
+        if not verify_password(
+            data.password,
+            user["password_hash"]
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid username/email or password"
+            )
+
+        token = create_access_token(
+            user["id"],
+            user["username"],
+            user["email"]
+        )
+
+        return {
+            "message": "Login successful",
+            "user": {
+                "id": user["id"],
+                "name": user["name"],
+                "username": user["username"],
+                "email": user["email"]
+            },
+            "access_token": token,
+            "token_type": "bearer"
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+@app.get("/me")
+def get_me(
+    credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())
+):
+
+    return get_current_user(credentials)
         cur.execute("""
             INSERT INTO users (name, username, email, password_hash)
             VALUES (%s, %s, %s, %s)
@@ -121,8 +270,6 @@ def login(data: LoginRequest):
 
     user = cur.fetchone()
 
-    cur.close()
-    conn.close()
 
     if user is None or user["password_hash"] is None:
         raise HTTPException(status_code=401, detail="Invalid username or password")
