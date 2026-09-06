@@ -1,4 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
+
+import Auth from "./components/Auth";
+import {
+  logoutUser,
+  getCurrentUser
+} from "./api";
+
 import {
   getAdminStats,
   getArtworks,
@@ -16,6 +23,19 @@ function formatPrice(price) {
 }
 
 function App() {
+
+  const [user, setUser] = useState(() => {
+
+  const savedUser =
+    localStorage.getItem("atelier_user");
+
+  return savedUser
+    ? JSON.parse(savedUser)
+    : null;
+});
+
+const [authMode, setAuthMode] = useState(null);
+  
   const [page, setPage] = useState("home");
   const [artworks, setArtworks] = useState([]);
   const [loading, setLoading] = useState(true);
