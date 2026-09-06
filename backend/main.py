@@ -35,6 +35,10 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
 
+class LoginRequest(BaseModel):
+    login: str
+    password: str
+
 class OrderRequest(BaseModel):
     user_id: int
     artwork_id: int
