@@ -14,11 +14,11 @@ from auth import (
 )
 
 from fastapi.middleware.cors import CORSMiddleware
-
+import psycopg2
 import os
 
 app = FastAPI()
-
+security = HTTPBearer()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -31,16 +31,19 @@ app.add_middleware(
 # ---------- request models ----------
 
 class RegisterRequest(BaseModel):
+    name: str
     username: str
     email: EmailStr
     password: str
 
 class LoginRequest(BaseModel):
     login: str
+
+class LoginRequest(BaseModel):
+    username: str
     password: str
 
 class OrderRequest(BaseModel):
-    user_id: int
     artwork_id: int
 # ---------- endpoints ----------
 
@@ -51,6 +54,7 @@ def home():
 
 @app.get("/artworks")
 def get_artworks():
+    release_stale_orders()
     conn = get_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
@@ -223,10 +227,76 @@ def get_me(
 ):
 
     return get_current_user(credentials)
+        cur.execute("""
+            INSERT INTO users (name, username, email, password_hash)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id, name, username, email
+        """, (
+            data.name,
+            data.username,
+            data.email,
+            hash_password(data.password)
+        ))
 
+        user = cur.fetchone()
+        conn.commit()
+
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Username or email already taken"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    token = create_access_token(user["id"], user["username"], user["email"])
+
+    return {"user": user, "access_token": token, "token_type": "bearer"}
+
+
+@app.post("/login")
+def login(data: LoginRequest):
+    conn = get_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    cur.execute("""
+        SELECT id, name, username, email, password_hash
+        FROM users
+        WHERE username = %s
+    """, (data.username,))
+
+    user = cur.fetchone()
+
+
+    if user is None or user["password_hash"] is None:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    if not verify_password(data.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    token = create_access_token(user["id"], user["username"], user["email"])
+
+    return {
+        "user": {
+            "id": user["id"],
+            "name": user["name"],
+            "username": user["username"],
+            "email": user["email"],
+        },
+        "access_token": token,
+        "token_type": "bearer"
+    }
 
 @app.post("/orders")
-def create_order(data: OrderRequest):
+def create_order(
+    data: OrderRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    user = get_current_user(credentials)
+
     conn = get_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
@@ -250,7 +320,7 @@ def create_order(data: OrderRequest):
             INSERT INTO orders (user_id, artwork_id, total, status)
             VALUES (%s, %s, %s, 'pending')
             RETURNING id, user_id, artwork_id, total, status
-        """, (data.user_id, data.artwork_id, artwork["price"]))
+        """, (user["id"], data.artwork_id, artwork["price"]))
 
         order = cur.fetchone()
         conn.commit()
@@ -333,3 +403,32 @@ def admin_stats(key: str):
         "revenue": revenue,
         "table": rows
     }
+
+def release_stale_orders():
+    """Free artworks whose orders were never paid within 10 minutes."""
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            UPDATE artworks
+            SET stock = 1
+            WHERE id IN (
+                SELECT artwork_id FROM orders
+                WHERE status = 'pending'
+                  AND created_at < NOW() - INTERVAL '10 minutes'
+            )
+        """)
+
+        cur.execute("""
+            UPDATE orders
+            SET status = 'expired'
+            WHERE status = 'pending'
+              AND created_at < NOW() - INTERVAL '10 minutes'
+        """)
+
+        conn.commit()
+
+    finally:
+        cur.close()
+        conn.close()
