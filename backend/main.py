@@ -42,7 +42,6 @@ class LoginRequest(BaseModel):
     password: str
 
 class OrderRequest(BaseModel):
-    user_id: int
     artwork_id: int
 # ---------- endpoints ----------
 
@@ -144,7 +143,12 @@ def login(data: LoginRequest):
     }
 
 @app.post("/orders")
-def create_order(data: OrderRequest):
+def create_order(
+    data: OrderRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    user = get_current_user(credentials)
+
     conn = get_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
@@ -168,7 +172,7 @@ def create_order(data: OrderRequest):
             INSERT INTO orders (user_id, artwork_id, total, status)
             VALUES (%s, %s, %s, 'pending')
             RETURNING id, user_id, artwork_id, total, status
-        """, (data.user_id, data.artwork_id, artwork["price"]))
+        """, (user["id"], data.artwork_id, artwork["price"]))
 
         order = cur.fetchone()
         conn.commit()
