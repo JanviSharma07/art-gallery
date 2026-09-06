@@ -52,6 +52,7 @@ def home():
 
 @app.get("/artworks")
 def get_artworks():
+    release_stale_orders()
     conn = get_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
@@ -255,3 +256,32 @@ def admin_stats(key: str):
         "revenue": revenue,
         "table": rows
     }
+
+def release_stale_orders():
+    """Free artworks whose orders were never paid within 10 minutes."""
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            UPDATE artworks
+            SET stock = 1
+            WHERE id IN (
+                SELECT artwork_id FROM orders
+                WHERE status = 'pending'
+                  AND created_at < NOW() - INTERVAL '10 minutes'
+            )
+        """)
+
+        cur.execute("""
+            UPDATE orders
+            SET status = 'expired'
+            WHERE status = 'pending'
+              AND created_at < NOW() - INTERVAL '10 minutes'
+        """)
+
+        conn.commit()
+
+    finally:
+        cur.close()
+        conn.close()
