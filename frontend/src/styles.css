@@ -161,7 +161,7 @@ img { display: block; width: 100%; }
 .art-card { min-width:0; }
 .offset-card { transform:translateY(60px); }
 .art-image {
-  aspect-ratio:.78; position:relative; overflow:hidden; background:var(--paper-dark); cursor:pointer;
+  aspect-ratio: 3/4; position:relative; overflow:hidden; background:var(--paper-dark); cursor:pointer;
 }
 .art-image img {
   width:100%; height:100%; object-fit:cover;
