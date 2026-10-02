@@ -31,16 +31,13 @@ app.add_middleware(
 # ---------- request models ----------
 
 class RegisterRequest(BaseModel):
-    name: str
+    name: str | None = None
     username: str
     email: EmailStr
     password: str
 
 class LoginRequest(BaseModel):
     login: str
-
-class LoginRequest(BaseModel):
-    username: str
     password: str
 
 class OrderRequest(BaseModel):
@@ -172,19 +169,15 @@ def login(data: LoginRequest):
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
     try:
-
-        cur.execute(
-            """
+        cur.execute("""
             SELECT id, name, username, email, password_hash
             FROM users
-            WHERE email = %s OR username = %s
-            """,
-            (data.login, data.login)
-        )
+            WHERE username = %s OR email = %s
+        """, (data.login, data.login))
 
         user = cur.fetchone()
 
-        if user is None:
+        if user is None or user["password_hash"] is None:
             raise HTTPException(
                 status_code=401,
                 detail="Invalid username/email or password"
@@ -225,37 +218,7 @@ def login(data: LoginRequest):
 def get_me(
     credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())
 ):
-
     return get_current_user(credentials)
-        cur.execute("""
-            INSERT INTO users (name, username, email, password_hash)
-            VALUES (%s, %s, %s, %s)
-            RETURNING id, name, username, email
-        """, (
-            data.name,
-            data.username,
-            data.email,
-            hash_password(data.password)
-        ))
-
-        user = cur.fetchone()
-        conn.commit()
-
-    except psycopg2.errors.UniqueViolation:
-        conn.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail="Username or email already taken"
-        )
-
-    finally:
-        cur.close()
-        conn.close()
-
-    token = create_access_token(user["id"], user["username"], user["email"])
-
-    return {"user": user, "access_token": token, "token_type": "bearer"}
-
 
 @app.post("/login")
 def login(data: LoginRequest):
@@ -360,6 +323,34 @@ def get_order(order_id: int):
 
     order["total"] = float(order["total"])
     return order
+
+@app.get("/my-orders")
+def my_orders(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    user = get_current_user(credentials)
+
+    conn = get_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    cur.execute("""
+        SELECT o.id, o.status, o.total, o.created_at,
+               a.title, a.artist, a.image_url
+        FROM orders o
+        JOIN artworks a ON a.id = o.artwork_id
+        WHERE o.user_id = %s
+        ORDER BY o.created_at DESC
+    """, (user["id"],))
+
+    orders = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    for order in orders:
+        order["total"] = float(order["total"])
+
+    return orders
 
 @app.get("/admin/stats")
 def admin_stats(key: str):
