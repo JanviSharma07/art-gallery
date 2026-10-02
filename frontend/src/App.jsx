@@ -8,8 +8,9 @@ import {
   getAdminStats,
   getArtworks,
   getOrder,
-  registerUser,
-  createOrder
+  createOrder,
+  getMyOrders,
+  changePassword
 } from "./api";
 
 
@@ -299,97 +300,43 @@ function App() {
 
   function openPurchase(artwork) {
 
+    if (!user) {
+      setAuthMode("login");
+      return;
+    }
+
     setSelectedArtwork(artwork);
-
-    setBuyerName(
-      user?.name ||
-      user?.username ||
-      ""
-    );
-
-    setBuyerEmail(
-      user?.email ||
-      ""
-    );
-
     setPurchaseError("");
-
     setBuyerModal(true);
 
   }
 
 
-  /* =========================================
-     PURCHASE
-  ========================================= */
-
   async function handlePurchase(event) {
 
     event.preventDefault();
 
-    if (
-      !buyerName.trim() ||
-      !buyerEmail.trim()
-    ) {
-
-      setPurchaseError(
-        "Please enter your name and email."
-      );
-
-      return;
-    }
-
     if (!selectedArtwork) return;
-
 
     try {
 
       setPurchaseLoading(true);
-
       setPurchaseError("");
 
-
-      /*
-       * Keep the existing purchase flow
-       * compatible with the current backend.
-       *
-       * Once the backend JWT purchase flow
-       * is implemented, this can be changed
-       * to use the authenticated user directly.
-       */
-
-      const registeredUser =
-        await registerUser(
-          buyerName.trim(),
-          buyerEmail.trim()
-        );
-
-
       const createdOrder =
-        await createOrder(
-          registeredUser.id,
-          selectedArtwork.id
-        );
-
+        await createOrder(selectedArtwork.id);
 
       setOrder(createdOrder);
-
       setBuyerModal(false);
-
       setSelectedArtwork(null);
 
       await loadArtworks();
 
       navigate("success");
 
-
     } catch (error) {
 
-      if (
-        error.message
-          ?.toLowerCase()
-          .includes("sold out")
-      ) {
+      if (error.message?.toLowerCase().includes("sold out")) {
 
         setPurchaseError(
           "This artwork has just been sold. Please choose another piece."
@@ -400,8 +347,7 @@ function App() {
       } else {
 
         setPurchaseError(
-          error.message ||
-          "Something went wrong while creating your order."
+          error.message || "Something went wrong while creating your order."
         );
 
       }
@@ -413,6 +359,7 @@ function App() {
     }
 
   }
+
 
 
   /* =========================================
@@ -618,7 +565,9 @@ function App() {
         />
 
       )}
-
+      {page === "profile" && (
+        <Profile user={user} />
+      )}
 
       {/* ADMIN */}
 
@@ -782,6 +731,7 @@ function Header({
           ["home", "Home"],
           ["collection", "Collection"],
           ["track", "Track Order"],
+          ...(user ? [["profile", "Profile"]] : []),
           ["admin", "Admin"]
         ].map(
           ([target, label]) => (
@@ -2773,5 +2723,259 @@ function Footer({
 
 }
 
+/* =========================================
+   PROFILE
+========================================= */
+
+function Profile({ user }) {
+
+  const [orders, setOrders] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [ordersError, setOrdersError] = useState("");
+
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [passwordMessage, setPasswordMessage] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordLoading, setPasswordLoading] = useState(false);
+
+  useEffect(() => {
+
+    async function loadOrders() {
+      try {
+        setOrdersLoading(true);
+        const data = await getMyOrders();
+        setOrders(Array.isArray(data) ? data : []);
+      } catch (error) {
+        setOrdersError(error.message || "Could not load your orders.");
+      } finally {
+        setOrdersLoading(false);
+      }
+    }
+
+    loadOrders();
+
+  }, []);
+
+
+  async function handlePasswordChange(event) {
+
+    event.preventDefault();
+
+    setPasswordError("");
+    setPasswordMessage("");
+
+    if (newPassword.length < 8) {
+      setPasswordError("New password must be at least 8 characters.");
+      return;
+    }
+
+    try {
+      setPasswordLoading(true);
+
+      await changePassword(currentPassword, newPassword);
+
+      setPasswordMessage("Password updated successfully.");
+      setCurrentPassword("");
+      setNewPassword("");
+      setShowPasswordForm(false);
+
+    } catch (error) {
+      setPasswordError(error.message || "Could not update password.");
+    } finally {
+      setPasswordLoading(false);
+    }
+
+  }
+
+
+  return (
+
+    <main className="page-main">
+
+      <section className="page-hero">
+
+        <div className="eyebrow">
+          <span className="eyebrow-line" />
+          YOUR ACCOUNT
+        </div>
+
+        <h1>
+          Hello,
+          <br />
+          <em>{user?.username || user?.name || "there"}.</em>
+        </h1>
+
+      </section>
+
+
+      <section className="section">
+
+        <SectionHeading
+          eyebrow="01 — DETAILS"
+          title="Account details"
+        />
+
+        <div className="purchase-summary">
+
+          <div>
+            <span>Username</span>
+            <strong>{user?.username || "—"}</strong>
+          </div>
+
+          <div>
+            <span>Email</span>
+            <strong>{user?.email || "—"}</strong>
+          </div>
+
+          <div>
+            <span>Password</span>
+            <strong>••••••••</strong>
+          </div>
+
+        </div>
+
+
+        {!showPasswordForm && (
+          <button
+            className="outline-btn"
+            onClick={() => setShowPasswordForm(true)}
+          >
+            Change password
+          </button>
+        )}
+
+
+        {passwordMessage && (
+          <div className="form-success">{passwordMessage}</div>
+        )}
+
+
+        {showPasswordForm && (
+
+          <form onSubmit={handlePasswordChange} className="track-form">
+
+            <label>
+              Current password
+              <input
+                type="password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                required
+              />
+            </label>
+
+            <label>
+              New password
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                minLength="8"
+                required
+              />
+            </label>
+
+            {passwordError && (
+              <div className="form-error">{passwordError}</div>
+            )}
+
+            <button className="primary-btn" disabled={passwordLoading}>
+              {passwordLoading ? "Updating..." : "Update password"}
+            </button>
+
+            <button
+              type="button"
+              className="text-btn"
+              onClick={() => {
+                setShowPasswordForm(false);
+                setPasswordError("");
+              }}
+            >
+              Cancel
+            </button>
+
+          </form>
+
+        )}
+
+      </section>
+
+
+      <section className="section">
+
+        <SectionHeading
+          eyebrow="02 — ORDERS"
+          title="Your orders"
+          description="Everything you have acquired from the gallery."
+        />
+
+        {ordersLoading && (
+          <div className="loading-grid">
+            <div className="skeleton-card" />
+          </div>
+        )}
+
+        {ordersError && (
+          <div className="form-error large-error">{ordersError}</div>
+        )}
+
+        {!ordersLoading && !ordersError && !orders.length && (
+          <div className="empty-state">
+            <div className="empty-icon">○</div>
+            <h3>No orders yet</h3>
+            <p>Works you acquire will appear here.</p>
+          </div>
+        )}
+
+        {orders.map((order) => (
+
+          <div className="order-result" key={order.id}>
+
+            <div className="order-image">
+              {order.image_url ? (
+                <img src={order.image_url} alt={order.title} />
+              ) : (
+                <ArtworkPlaceholder title={order.title} />
+              )}
+            </div>
+
+            <div className="order-content">
+
+              <span className="eyebrow">ORDER #{order.id}</span>
+
+              <h2>{order.title}</h2>
+
+              <span className="art-artist">
+                {order.artist || "Unknown Artist"}
+              </span>
+
+              <div className="order-status">
+                <span className="status-ring" />
+                <div>
+                  <span>Status</span>
+                  <strong>{order.status}</strong>
+                </div>
+              </div>
+
+              <div className="order-total">
+                <span>Total</span>
+                <strong>{formatPrice(order.total)}</strong>
+              </div>
+
+            </div>
+
+          </div>
+
+        ))}
+
+      </section>
+
+    </main>
+
+  );
+
+}
 
 export default App;

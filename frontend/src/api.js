@@ -2,12 +2,12 @@ const API_URL =
   import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
 async function request(endpoint, options = {}) {
-  const response = await fetch(`${API_URL}${endpoint}`, {
+    const response = await fetch(`${API_URL}${endpoint}`, {
+    ...options,
     headers: {
       "Content-Type": "application/json",
       ...(options.headers || {})
-    },
-    ...options
+    }
   });
 
   let data = null;
@@ -78,12 +78,39 @@ export function logoutUser() {
   localStorage.removeItem("atelier_token");
   localStorage.removeItem("atelier_user");
 }
+export async function getMyOrders() {
+  const token = localStorage.getItem("atelier_token");
 
-export async function createOrder(userId, artworkId) {
+  return request("/my-orders", {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+}
+
+export async function changePassword(currentPassword, newPassword) {
+  const token = localStorage.getItem("atelier_token");
+
+  return request("/change-password", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword
+    })
+  });
+}
+export async function createOrder(artworkId) {
+  const token = localStorage.getItem("atelier_token");
+
   return request("/orders", {
     method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
     body: JSON.stringify({
-      user_id: userId,
       artwork_id: artworkId
     })
   });
