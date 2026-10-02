@@ -42,6 +42,10 @@ class LoginRequest(BaseModel):
 
 class OrderRequest(BaseModel):
     artwork_id: int
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
 # ---------- endpoints ----------
 
 @app.get("/")
@@ -419,6 +423,60 @@ def release_stale_orders():
         """)
 
         conn.commit()
+
+    finally:
+        cur.close()
+        conn.close()
+
+@app.post("/change-password")
+def change_password(
+    data: ChangePasswordRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    current_user = get_current_user(credentials)
+
+    if len(data.new_password) < 8:
+        raise HTTPException(
+            status_code=400,
+            detail="New password must be at least 8 characters long"
+        )
+
+    conn = get_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        cur.execute(
+            "SELECT password_hash FROM users WHERE id = %s",
+            (current_user["id"],)
+        )
+
+        user = cur.fetchone()
+
+        if user is None or user["password_hash"] is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if not verify_password(data.current_password, user["password_hash"]):
+            raise HTTPException(
+                status_code=401,
+                detail="Current password is incorrect"
+            )
+
+        cur.execute(
+            "UPDATE users SET password_hash = %s WHERE id = %s",
+            (hash_password(data.new_password), current_user["id"])
+        )
+
+        conn.commit()
+
+        return {"message": "Password updated successfully"}
+
+    except HTTPException:
+        conn.rollback()
+        raise
+
+    except Exception:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail="Could not update password")
 
     finally:
         cur.close()
