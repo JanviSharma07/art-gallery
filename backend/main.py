@@ -27,7 +27,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+import razorpay
 
+razorpay_client = razorpay.Client(auth=(
+    os.getenv("RAZORPAY_KEY_ID"),
+    os.getenv("RAZORPAY_KEY_SECRET")
+))
 # ---------- request models ----------
 
 class RegisterRequest(BaseModel):
@@ -282,7 +287,9 @@ def create_order(
             conn.rollback()
             raise HTTPException(status_code=409, detail="Sold out")
 
-        # create the order using the price from the database
+        amount_paise = int(float(artwork["price"]) * 100)
+
+        # create the order in our database first
         cur.execute("""
             INSERT INTO orders (user_id, artwork_id, total, status)
             VALUES (%s, %s, %s, 'pending')
@@ -290,10 +297,30 @@ def create_order(
         """, (user["id"], data.artwork_id, artwork["price"]))
 
         order = cur.fetchone()
+
+        # ask Razorpay to create a matching payment order
+        rzp_order = razorpay_client.order.create({
+            "amount": amount_paise,
+            "currency": "INR",
+            "receipt": f"order_{order['id']}",
+            "payment_capture": 1
+        })
+
+        cur.execute(
+            "UPDATE orders SET razorpay_order_id = %s WHERE id = %s",
+            (rzp_order["id"], order["id"])
+        )
+
         conn.commit()
 
-        order["total"] = float(order["total"])
-        return order
+        return {
+            "order_id": order["id"],
+            "amount": amount_paise,
+            "currency": "INR",
+            "razorpay_order_id": rzp_order["id"],
+            "razorpay_key_id": os.getenv("RAZORPAY_KEY_ID"),
+            "artwork_title": artwork["title"]
+        }
 
     except HTTPException:
         raise
@@ -477,6 +504,69 @@ def change_password(
     except Exception:
         conn.rollback()
         raise HTTPException(status_code=500, detail="Could not update password")
+
+    finally:
+        cur.close()
+        conn.close()
+
+from fastapi import Request
+import hmac
+import hashlib
+
+
+@app.post("/payment/webhook")
+async def payment_webhook(request: Request):
+    body = await request.body()
+    signature = request.headers.get("X-Razorpay-Signature", "")
+    secret = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
+
+    expected = hmac.new(
+        secret.encode(),
+        body,
+        hashlib.sha256
+    ).hexdigest()
+
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    import json
+    payload = json.loads(body)
+
+    event = payload.get("event")
+
+    if event != "payment.captured":
+        return {"status": "ignored"}
+
+    payment = payload["payload"]["payment"]["entity"]
+    rzp_order_id = payment.get("order_id")
+    rzp_payment_id = payment.get("id")
+    amount = payment.get("amount", 0) / 100
+
+    conn = get_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        cur.execute("""
+            UPDATE orders
+            SET status = 'paid'
+            WHERE razorpay_order_id = %s AND status = 'pending'
+            RETURNING id
+        """, (rzp_order_id,))
+
+        order = cur.fetchone()
+
+        if order:
+            cur.execute("""
+                INSERT INTO payments (order_id, razorpay_payment_id, amount, status)
+                VALUES (%s, %s, %s, 'captured')
+            """, (order["id"], rzp_payment_id, amount))
+
+        conn.commit()
+        return {"status": "ok"}
+
+    except Exception:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail="Webhook processing failed")
 
     finally:
         cur.close()
