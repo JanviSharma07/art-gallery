@@ -298,7 +298,7 @@ function App() {
      OPEN PURCHASE
   ========================================= */
 
-  function openPurchase(artwork) {
+    function openPurchase(artwork) {
 
     if (!user) {
       setAuthMode("login");
@@ -307,55 +307,78 @@ function App() {
 
     setSelectedArtwork(artwork);
     setPurchaseError("");
-    setBuyerModal(true);
+    handlePurchase();
 
   }
 
 
   async function handlePurchase(event) {
 
-    event.preventDefault();
+    if (event) event.preventDefault();
 
-    if (!selectedArtwork) return;
+    const artwork = selectedArtwork;
+    if (!artwork) return;
 
     try {
 
       setPurchaseLoading(true);
       setPurchaseError("");
 
-      const createdOrder =
-        await createOrder(selectedArtwork.id);
+      const orderData = await createOrder(selectedArtwork.id);
 
-      setOrder(createdOrder);
-      setBuyerModal(false);
-      setSelectedArtwork(null);
+      const options = {
+        key: orderData.razorpay_key_id,
+        amount: orderData.amount,
+        currency: orderData.currency,
+        name: "Atelier",
+        description: orderData.artwork_title,
+        order_id: orderData.razorpay_order_id,
+        prefill: {
+          name: user?.username || "",
+          email: user?.email || ""
+        },
+        theme: { color: "#1a1a18" },
+        handler: async function () {
+          setSelectedArtwork(null);
+          navigate("success");
+          await loadArtworks();
 
-      await loadArtworks();
+          for (let i = 0; i < 10; i++) {
+            try {
+              const fresh = await getOrder(orderData.order_id);
+              setOrder(fresh);
+              if (fresh.status === "paid") break;
+            } catch (e) {
+              // keep trying
+            }
+            await new Promise(r => setTimeout(r, 1500));
+          }
+        },
+        modal: {
+          ondismiss: function () {
+            setPurchaseLoading(false);
+          }
+        }
+      };
 
-      navigate("success");
+      const rzp = new window.Razorpay(options);
+      rzp.open();
 
     } catch (error) {
 
       if (error.message?.toLowerCase().includes("sold out")) {
-
         setPurchaseError(
           "This artwork has just been sold. Please choose another piece."
         );
-
         await loadArtworks();
-
       } else {
-
         setPurchaseError(
           error.message || "Something went wrong while creating your order."
         );
-
       }
 
     } finally {
-
       setPurchaseLoading(false);
-
     }
 
   }
@@ -1981,11 +2004,11 @@ function Success({
 
       <h1>
 
-        Your piece is
+        Congratulations,
         <br />
 
         <em>
-          reserved.
+          your order is placed.
         </em>
 
       </h1>

@@ -61,8 +61,7 @@ export default function Auth({ mode, onSuccess, onClose }) {
         JSON.stringify(response.user)
       );
 
-      onSuccess(response.user);
-
+      onSuccess(response);
     } catch (err) {
 
       setError(

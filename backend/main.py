@@ -276,8 +276,8 @@ def create_order(
         # claim the artwork — only succeeds if it is still available
         cur.execute("""
             UPDATE artworks
-            SET stock = 0
-            WHERE id = %s AND stock = 1
+            SET stock = stock - 1
+            WHERE id = %s AND stock > 0
             RETURNING id, title, price
         """, (data.artwork_id,))
 
@@ -429,12 +429,12 @@ def admin_stats(key: str):
 def release_stale_orders():
     """Free artworks whose orders were never paid within 10 minutes."""
     conn = get_connection()
-    cur = conn.cursor()
+    cur = conn.cursor() 
 
     try:
         cur.execute("""
-            UPDATE artworks
-            SET stock = 1
+            UPDATE artworks 
+            SET stock = stock + 1
             WHERE id IN (
                 SELECT artwork_id FROM orders
                 WHERE status = 'pending'
@@ -570,4 +570,4 @@ async def payment_webhook(request: Request):
 
     finally:
         cur.close()
-        conn.close()
+        conn.close() 
